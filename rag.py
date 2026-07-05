@@ -1,18 +1,42 @@
 import os
 import tempfile
+import streamlit as st
 
 from dotenv import load_dotenv
 
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_community.vectorstores import FAISS
+
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 from langchain_groq import ChatGroq
 from langchain_core.prompts import PromptTemplate
 
+# --------------------------------------------------
+# Load Environment Variables
+# --------------------------------------------------
+
 load_dotenv()
 
+# Works both locally (.env) and on Streamlit Cloud (Secrets)
+GROQ_API_KEY = st.secrets.get("GROQ_API_KEY") or os.getenv("GROQ_API_KEY")
+
+# --------------------------------------------------
+# Constants
+# --------------------------------------------------
+
+CHUNK_SIZE = 500
+CHUNK_OVERLAP = 50
+TOP_K = 3
+
+EMBEDDING_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
+
+LLM_MODEL = "llama-3.1-8b-instant"
+
+# --------------------------------------------------
+# Load PDF
+# --------------------------------------------------
 
 def load_pdf(uploaded_file):
 
@@ -28,22 +52,28 @@ def load_pdf(uploaded_file):
     return documents
 
 
+# --------------------------------------------------
+# Split Documents
+# --------------------------------------------------
+
 def split_documents(documents):
 
     splitter = RecursiveCharacterTextSplitter(
-        chunk_size=500,
-        chunk_overlap=50
+        chunk_size=CHUNK_SIZE,
+        chunk_overlap=CHUNK_OVERLAP,
     )
 
-    chunks = splitter.split_documents(documents)
+    return splitter.split_documents(documents)
 
-    return chunks
 
+# --------------------------------------------------
+# Create Vector Store
+# --------------------------------------------------
 
 def create_vectorstore(chunks):
 
     embedding_model = HuggingFaceEmbeddings(
-        model_name="sentence-transformers/all-MiniLM-L6-v2"
+        model_name=EMBEDDING_MODEL
     )
 
     vectorstore = FAISS.from_documents(
@@ -54,35 +84,47 @@ def create_vectorstore(chunks):
     return vectorstore
 
 
+# --------------------------------------------------
+# Retrieve Documents
+# --------------------------------------------------
+
 def retrieve_documents(vectorstore, question):
 
-    retrieved_docs = vectorstore.similarity_search(
+    return vectorstore.similarity_search(
         question,
-        k=3
+        k=TOP_K
     )
 
-    return retrieved_docs
 
+# --------------------------------------------------
+# Generate Answer
+# --------------------------------------------------
 
 def generate_answer(question, retrieved_docs):
 
+    if not GROQ_API_KEY:
+        raise ValueError(
+            "Groq API key not found. Please configure GROQ_API_KEY in Streamlit Secrets or your .env file."
+        )
+
     context = "\n\n".join(
-        [doc.page_content for doc in retrieved_docs]
+        doc.page_content for doc in retrieved_docs
     )
 
     prompt = PromptTemplate(
         input_variables=["context", "question"],
-        template= """
-You are a document question-answering assistant.
+        template="""
+You are a Retrieval-Augmented Generation (RAG) assistant.
 
-Answer ONLY using the information in the context below.
+Use ONLY the information provided in the context below.
 
-If the answer is not present in the context, reply exactly:
+If the answer cannot be found in the context, reply exactly:
 
 "I couldn't find the answer in the uploaded document."
 
-Do not use your own knowledge.
-Do not make up information.
+Do not use outside knowledge.
+Do not guess.
+Do not fabricate information.
 
 Context:
 {context}
@@ -95,8 +137,8 @@ Answer:
     )
 
     llm = ChatGroq(
-        api_key=os.getenv("GROQ_API_KEY"),
-        model="llama-3.1-8b-instant",
+        api_key=GROQ_API_KEY,
+        model=LLM_MODEL,
         temperature=0
     )
 
