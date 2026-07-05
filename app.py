@@ -7,13 +7,19 @@ from rag import (
     generate_answer,
 )
 
+# --------------------------------------------------
+# Page Configuration
+# --------------------------------------------------
+
 st.set_page_config(
-    page_title="RAG PDF Assistant",
+    page_title="📄 RAG PDF Assistant",
     page_icon="📄",
     layout="wide"
 )
 
-# ---------------- Session State ---------------- #
+# --------------------------------------------------
+# Session State
+# --------------------------------------------------
 
 if "vectorstore" not in st.session_state:
     st.session_state.vectorstore = None
@@ -27,13 +33,14 @@ if "chunks" not in st.session_state:
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
-
-# ---------------- Sidebar ---------------- #
+# --------------------------------------------------
+# Sidebar
+# --------------------------------------------------
 
 with st.sidebar:
 
     st.title("📄 PDF Assistant")
-    st.caption("Upload a PDF and chat with it using AI.")
+    st.write("Upload a PDF and ask questions using AI.")
 
     uploaded_file = st.file_uploader(
         "Choose a PDF",
@@ -44,74 +51,101 @@ with st.sidebar:
 
         if st.button("📄 Process Document", use_container_width=True):
 
-            with st.spinner("Processing document..."):
+            try:
 
-                documents = load_pdf(uploaded_file)
-                chunks = split_documents(documents)
-                vectorstore = create_vectorstore(chunks)
+                progress = st.progress(0)
+
+                with st.spinner("Loading PDF..."):
+                    progress.progress(20)
+                    documents = load_pdf(uploaded_file)
+
+                with st.spinner("Splitting document..."):
+                    progress.progress(50)
+                    chunks = split_documents(documents)
+
+                with st.spinner("Creating vector database..."):
+                    progress.progress(80)
+                    vectorstore = create_vectorstore(chunks)
+
+                progress.progress(100)
 
                 st.session_state.documents = documents
                 st.session_state.chunks = chunks
                 st.session_state.vectorstore = vectorstore
                 st.session_state.messages = []
 
-            st.success("✅ Document processed successfully!")
+                st.success("✅ Document processed successfully!")
+
+            except Exception as e:
+
+                st.error("❌ Failed to process the document.")
+                st.exception(e)
 
     st.divider()
 
     if st.session_state.documents:
 
-        st.subheader("📑 Document Info")
+        st.subheader("📑 Document Information")
 
-        st.markdown(
-            f"""
-📄 **Pages:** {len(st.session_state.documents)}
+        col1, col2 = st.columns(2)
 
-✂ **Chunks:** {len(st.session_state.chunks)}
+        col1.metric("Pages", len(st.session_state.documents))
+        col2.metric("Chunks", len(st.session_state.chunks))
 
-🟢 **Status:** Ready
-"""
-        )
+        st.success("Ready for Questions")
 
         st.divider()
 
-        if st.button("🗑 Clear Chat", use_container_width=True):
+        if st.button("🗑️ Clear Chat", use_container_width=True):
+
             st.session_state.messages = []
             st.rerun()
 
-        if st.button("📄 New Document", use_container_width=True):
+        if st.button("📄 Upload New Document", use_container_width=True):
+
             st.session_state.vectorstore = None
             st.session_state.documents = None
             st.session_state.chunks = None
             st.session_state.messages = []
+
             st.rerun()
 
     st.divider()
 
-    st.caption("🚀 Powered by")
-    st.caption("LangChain • FAISS")
-    st.caption("HuggingFace • Groq") 
+    st.markdown("### ⚙️ Tech Stack")
 
+    st.markdown("""
+- LangChain
+- FAISS
+- HuggingFace Embeddings
+- Groq Llama 3.1
+- Streamlit
+""")
 
-# ---------------- Main ---------------- #
+# --------------------------------------------------
+# Main Page
+# --------------------------------------------------
 
 st.title("📄 RAG Document Question Answering")
 
 st.markdown(
-    """
-Ask questions from your uploaded PDF using **Retrieval-Augmented Generation (RAG)**.
+"""
+Upload a PDF document and ask questions using
+**Retrieval-Augmented Generation (RAG)**.
 
-Upload once • Process once • Ask unlimited questions 🚀
+The assistant retrieves relevant document chunks before generating answers with **Groq Llama 3.1**.
 """
 )
 
 if st.session_state.vectorstore is None:
 
-    st.info("👈 Upload a PDF and click **Process PDF** to begin.")
+    st.info("👈 Upload a PDF and click **Process Document** to begin.")
 
     st.stop()
 
-# Display previous chat
+# --------------------------------------------------
+# Display Previous Messages
+# --------------------------------------------------
 
 for message in st.session_state.messages:
 
@@ -119,21 +153,25 @@ for message in st.session_state.messages:
 
         st.markdown(message["content"])
 
-        if message["role"] == "assistant" and "sources" in message:
+        if message["role"] == "assistant":
 
-            with st.expander("📚 View Sources"):
+            if "sources" in message:
 
-                for i, doc in enumerate(message["sources"]):
+                with st.expander("📚 Retrieved Source Chunks"):
 
-                    st.markdown(f"**Chunk {i+1}**")
+                    for idx, doc in enumerate(message["sources"], start=1):
 
-                    st.write(doc.page_content)
+                        st.markdown(f"### Chunk {idx}")
 
-# Chat input
+                        st.write(doc.page_content)
+
+# --------------------------------------------------
+# Chat Input
+# --------------------------------------------------
 
 question = st.chat_input("Ask anything about your PDF...")
 
-if question:
+if question and question.strip():
 
     st.session_state.messages.append(
         {
@@ -146,40 +184,68 @@ if question:
 
         st.markdown(question)
 
-    with st.spinner("🔍 Searching document and generating answer..."):
+    try:
 
-        retrieved_docs = retrieve_documents(
-            st.session_state.vectorstore,
-            question
+        with st.spinner("🔍 Searching document..."):
+
+            retrieved_docs = retrieve_documents(
+                st.session_state.vectorstore,
+                question
+            )
+
+        with st.spinner("🤖 Generating answer..."):
+
+            answer = generate_answer(
+                question,
+                retrieved_docs
+            )
+
+        st.session_state.messages.append(
+            {
+                "role": "assistant",
+                "content": answer,
+                "sources": retrieved_docs
+            }
         )
 
-        answer = generate_answer(
-            question,
-            retrieved_docs
-        )
+        with st.chat_message("assistant"):
 
-    st.session_state.messages.append(
-        {
-            "role": "assistant",
-            "content": answer,
-            "sources": retrieved_docs
-        }
-    )
+            st.markdown(answer)
 
-    with st.chat_message("assistant"):
+            st.caption(
+                f"Retrieved **{len(retrieved_docs)}** relevant chunks."
+            )
 
-        st.markdown(answer)
+            with st.expander("📚 Retrieved Source Chunks"):
 
-        with st.expander("📚 View Sources"):
+                for idx, doc in enumerate(retrieved_docs, start=1):
 
-            for i, doc in enumerate(retrieved_docs):
+                    st.markdown(f"### Chunk {idx}")
 
-                st.markdown(f"**Chunk {i+1}**")
+                    st.write(doc.page_content)
 
-                st.write(doc.page_content)
+    except Exception as e:
+
+        st.error("❌ Unable to generate an answer.")
+
+        st.exception(e)
+
+# --------------------------------------------------
+# Footer
+# --------------------------------------------------
 
 st.divider()
 
-st.caption(
-    "Built with ❤️ using Streamlit • LangChain • FAISS • Groq • Llama 3.1"
+st.markdown(
+"""
+<div style="text-align:center">
+
+Built with ❤️ by <b>Abhikriti Saxena</b>
+
+<b>Streamlit</b> • <b>LangChain</b> • <b>FAISS</b> •
+<b>HuggingFace</b> • <b>Groq Llama 3.1</b>
+
+</div>
+""",
+unsafe_allow_html=True,
 )
