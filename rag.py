@@ -19,9 +19,6 @@ from langchain_core.prompts import PromptTemplate
 
 load_dotenv()
 
-# Works both locally (.env) and on Streamlit Cloud (Secrets)
-GROQ_API_KEY = st.secrets.get("GROQ_API_KEY") or os.getenv("GROQ_API_KEY")
-
 # --------------------------------------------------
 # Constants
 # --------------------------------------------------
@@ -31,7 +28,6 @@ CHUNK_OVERLAP = 50
 TOP_K = 3
 
 EMBEDDING_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
-
 LLM_MODEL = "llama-3.1-8b-instant"
 
 # --------------------------------------------------
@@ -102,11 +98,6 @@ def retrieve_documents(vectorstore, question):
 
 def generate_answer(question, retrieved_docs):
 
-    if not GROQ_API_KEY:
-        raise ValueError(
-            "Groq API key not found. Please configure GROQ_API_KEY in Streamlit Secrets or your .env file."
-        )
-
     context = "\n\n".join(
         doc.page_content for doc in retrieved_docs
     )
@@ -136,8 +127,19 @@ Answer:
 """
     )
 
+    # Read API key (Streamlit Cloud -> Secrets, Local -> .env)
+    try:
+        api_key = st.secrets["GROQ_API_KEY"]
+    except Exception:
+        api_key = os.getenv("GROQ_API_KEY")
+
+    if not api_key:
+        raise ValueError(
+            "GROQ_API_KEY not found. Add it to your .env file (local) or Streamlit Secrets (cloud)."
+        )
+
     llm = ChatGroq(
-        api_key=GROQ_API_KEY,
+        api_key=api_key,
         model=LLM_MODEL,
         temperature=0
     )
